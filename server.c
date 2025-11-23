@@ -1,5 +1,5 @@
 /*
- * server.c
+ * server.c - 檔案伺服器 v3
  */
 
 #include <stdio.h>
@@ -11,7 +11,7 @@
 #include <pthread.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <time.h> // 新增時間函式庫
+#include <time.h>
 
 #define PORT 8888
 #define MAX_FILES 20
@@ -22,9 +22,9 @@ typedef struct {
     char name[50];
     char owner[50];
     char group[50];
-    char perms[7];       // 權限字串 (例如: "rwrnnn")
+    char perms[7];
     int is_used;
-    pthread_rwlock_t lock; // 讀寫鎖
+    pthread_rwlock_t lock;
 } FileEntry;
 
 FileEntry file_list[MAX_FILES];
@@ -55,29 +55,22 @@ void print_capability_lists() {
     printf("=======================================\n\n");
 }
 
-// [新增] 檢查權限字串格式
-// 規則: 長度必須為 6，且字元必須是 r, w, 或 n
 int check_perm_format(const char *perms) {
     if (strlen(perms) != 6) return 0;
-    
     for (int i = 0; i < 6; i++) {
-        // 偶數位置(0,2,4)應該是 r 或 n
         if (i % 2 == 0) {
             if (perms[i] != 'r' && perms[i] != 'n') return 0;
-        }
-        // 奇數位置(1,3,5)應該是 w 或 n
-        else {
+        } else {
             if (perms[i] != 'w' && perms[i] != 'n') return 0;
         }
     }
     return 1;
 }
 
-// 檢查是否有操作權限
 int check_permission(FileEntry *file, char *user, char *group, char mode) {
-    int offset = 4; // 預設其他人
-    if (strcmp(file->owner, user) == 0) offset = 0;      // 擁有者
-    else if (strcmp(file->group, group) == 0) offset = 2; // 群組
+    int offset = 4;
+    if (strcmp(file->owner, user) == 0) offset = 0;
+    else if (strcmp(file->group, group) == 0) offset = 2;
 
     char p_target = (mode == 'r') ? file->perms[offset] : file->perms[offset + 1];
     
@@ -92,21 +85,36 @@ void *client_handler(void *arg) {
     char buffer[BUFFER_SIZE];
     int n;
 
-    // 接收登入
+    // 1. 接收登入資訊
     memset(buffer, 0, BUFFER_SIZE);
     if (recv(sock, buffer, BUFFER_SIZE, 0) <= 0) {
         close(sock); free(client); return NULL;
     }
     sscanf(buffer, "%s %s", client->user, client->group);
+
+    // [新增] 檢查群組名稱是否有在允許清單中
+    if (strcmp(client->group, "AOS-group") != 0 && strcmp(client->group, "CSE-group") != 0) {
+        printf("登入失敗: %s 使用了無效群組 %s\n", client->user, client->group);
+        char *error_msg = "Login Failed: Invalid Group. Only 'AOS-group' or 'CSE-group' allowed.";
+        send(sock, error_msg, strlen(error_msg), 0);
+        
+        // 群組錯誤直接斷線
+        close(sock);
+        free(client);
+        return NULL; 
+    }
+
+    // 登入成功
+    printf("客戶端登入成功: 使用者=%s, 群組=%s\n", client->user, client->group);
     send(sock, "Login OK", 8, 0);
 
+    // 2. 指令處理迴圈
     while (1) {
         memset(buffer, 0, BUFFER_SIZE);
         n = recv(sock, buffer, BUFFER_SIZE, 0);
         if (n <= 0) break;
 
         char cmd[10], arg1[50], arg2[50];
-        // 初始化參數，避免殘留
         memset(cmd, 0, sizeof(cmd));
         memset(arg1, 0, sizeof(arg1));
         memset(arg2, 0, sizeof(arg2));
@@ -115,9 +123,7 @@ void *client_handler(void *arg) {
         char response[BUFFER_SIZE];
         memset(response, 0, BUFFER_SIZE);
 
-        // === NEW 指令 ===
         if (strcmp(cmd, "new") == 0) {
-            // [修改] 先檢查權限格式
             if (!check_perm_format(arg2)) {
                 sprintf(response, "錯誤: 權限格式錯誤 (必須是6碼，例如 rwrnnn)");
             } else {
@@ -143,9 +149,7 @@ void *client_handler(void *arg) {
                 pthread_mutex_unlock(&list_mutex);
             }
         
-        // === CHANGE 指令 ===
         } else if (strcmp(cmd, "change") == 0) {
-            // [修改] 變更權限也要檢查格式
             if (!check_perm_format(arg2)) {
                 sprintf(response, "錯誤: 權限格式錯誤 (必須是6碼，例如 rwrnnn)");
             } else {
@@ -165,7 +169,6 @@ void *client_handler(void *arg) {
                 if (!found) sprintf(response, "錯誤: 找不到檔案。");
             }
 
-        // === READ 指令 ===
         } else if (strcmp(cmd, "read") == 0) {
             int idx = -1;
             for(int i=0; i<MAX_FILES; i++) {
@@ -181,7 +184,7 @@ void *client_handler(void *arg) {
                     FILE *fp = fopen(arg1, "r");
                     if (fp) {
                         char content[500];
-                        fgets(content, 500, fp); // 讀第一行
+                        fgets(content, 500, fp);
                         sprintf(response, "讀取內容: %s", content);
                         fclose(fp);
                     } else {
@@ -195,7 +198,6 @@ void *client_handler(void *arg) {
                 sprintf(response, "錯誤: 找不到檔案。");
             }
 
-        // === WRITE 指令 ===
         } else if (strcmp(cmd, "write") == 0) {
             int idx = -1;
             for(int i=0; i<MAX_FILES; i++) {
@@ -213,13 +215,11 @@ void *client_handler(void *arg) {
                     else fp = fopen(arg1, "a");
 
                     if (fp) {
-                        // [新增] 取得目前時間
                         time_t now = time(NULL);
                         struct tm *t = localtime(&now);
                         char time_str[64];
                         strftime(time_str, sizeof(time_str), "%Y/%m/%d-%H:%M:%S", t);
                         
-                        // [新增] 寫入內容包含時間
                         fprintf(fp, "%s wrote here at %s\n", client->user, time_str);
                         fclose(fp);
                         sprintf(response, "寫入成功 (時間: %s)。", time_str);
@@ -250,7 +250,7 @@ int main() {
 
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) { perror("Socket failed"); exit(1); }
     
-    int opt = 1; // 允許 Port 重複使用
+    int opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     address.sin_family = AF_INET;
