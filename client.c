@@ -1,6 +1,5 @@
 /*
- * client.c - 檔案系統客戶端
- * 連線到伺服器並傳送指令
+ * client.c
  */
 
 #include <stdio.h>
