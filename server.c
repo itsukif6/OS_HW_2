@@ -288,7 +288,7 @@ void *client_handler(void *arg)
                     {
                         char content[500];
                         fgets(content, 500, fp);
-                        sprintf(response, "讀取內容: %s", content);
+                        sprintf(response, "讀取內容: %s ...and more", content);
                         fclose(fp);
                     }
                     else
