@@ -98,6 +98,26 @@ int main()
         if (valread > 0)
         {
             printf("伺服器: %s\n", buffer);
+            
+            // 檢查是否需要等待 (檔案正在被讀取或寫入)
+            if (strstr(buffer, "該檔案正在被讀取") != NULL || strstr(buffer, "該檔案正在被寫入") != NULL)
+            {
+                // 等待第二次回應 (讀取完成或寫入完成)
+                memset(buffer, 0, BUFFER_SIZE);
+                valread = read(sock, buffer, BUFFER_SIZE);
+                if (valread > 0)
+                {
+                    printf("伺服器: %s\n", buffer);
+                    
+                    // 接收最終的執行結果
+                    memset(buffer, 0, BUFFER_SIZE);
+                    valread = read(sock, buffer, BUFFER_SIZE);
+                    if (valread > 0)
+                    {
+                        printf("伺服器: %s\n", buffer);
+                    }
+                }
+            }
         }
         else
         {

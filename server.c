@@ -263,8 +263,22 @@ void *client_handler(void *arg)
                 // 檢查是否有讀取權限
                 if (check_permission(&file_list[idx], client->user, client->group, 'r'))
                 {
-                    // 使用讀寫鎖的 "讀鎖" (Shared lock)，允許多人同時讀取
-                    pthread_rwlock_rdlock(&file_list[idx].lock);
+                    // 嘗試取得讀鎖，如果有人正在寫入則會等待
+                    int lock_result = pthread_rwlock_tryrdlock(&file_list[idx].lock);
+                    if (lock_result != 0)
+                    {
+                        // 無法立即取得讀鎖，表示有人正在寫入
+                        sprintf(response, "該檔案正在被寫入");
+                        send(sock, response, strlen(response), 0);
+                        
+                        // 等待寫入完成
+                        pthread_rwlock_rdlock(&file_list[idx].lock);
+                        
+                        // 寫入完成後通知客戶端
+                        memset(response, 0, BUFFER_SIZE);
+                        sprintf(response, "寫入完成");
+                        send(sock, response, strlen(response), 0);
+                    }
 
                     printf("[Read] %s 正在讀取... (模擬延遲耗時 5 秒)\n", client->user);
                     sleep(5); // 模擬讀取耗時 5 秒，可以用來測試併發讀取
@@ -312,8 +326,22 @@ void *client_handler(void *arg)
                 // 檢查是否有寫入權限
                 if (check_permission(&file_list[idx], client->user, client->group, 'w'))
                 {
-                    // 使用讀寫鎖的 "寫鎖" (Exclusive Lock)，寫入時其他人不能讀寫
-                    pthread_rwlock_wrlock(&file_list[idx].lock);
+                    // 嘗試取得寫鎖，如果有人正在讀取或寫入則會等待
+                    int lock_result = pthread_rwlock_trywrlock(&file_list[idx].lock);
+                    if (lock_result != 0)
+                    {
+                        // 無法立即取得寫鎖，表示有人正在讀取
+                        sprintf(response, "該檔案正在被讀取");
+                        send(sock, response, strlen(response), 0);
+                        
+                        // 等待讀取完成
+                        pthread_rwlock_wrlock(&file_list[idx].lock);
+                        
+                        // 讀取完成後通知客戶端
+                        memset(response, 0, BUFFER_SIZE);
+                        sprintf(response, "讀取完成");
+                        send(sock, response, strlen(response), 0);
+                    }
 
                     printf("[Write] %s 正在寫入... (模擬延遲耗時 10 秒)\n", client->user);
                     sleep(10); // 模擬寫入耗時 10 秒，可以用來測試鎖定機制
